@@ -12,6 +12,15 @@ MENU_OPTIONS = {
     "0": "退出程序",
 }
 
+USER_MENU_OPTIONS = {
+    "1": "创建用户",
+    "2": "查看用户列表",
+    "3": "切换用户",
+    "4": "删除用户",
+    "5": "查看当前用户",
+    "0": "返回主菜单",
+}
+
 
 def render_main_menu() -> None:
     """渲染主菜单。
@@ -22,6 +31,20 @@ def render_main_menu() -> None:
     print_title("LangChain Chat")
 
     for key, label in MENU_OPTIONS.items():
+        console.print(f"[bold]{key}.[/bold] {label}")
+
+    print_blank_line()
+
+
+def render_user_menu() -> None:
+    """渲染用户管理子菜单。
+
+    这里只展示菜单项，不包含任何业务逻辑。
+    """
+    print_blank_line()
+    print_title("用户管理")
+
+    for key, label in USER_MENU_OPTIONS.items():
         console.print(f"[bold]{key}.[/bold] {label}")
 
     print_blank_line()

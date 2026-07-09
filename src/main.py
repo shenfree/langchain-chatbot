@@ -1,7 +1,7 @@
 ﻿"""项目入口文件。
 
-Step 2 开始，入口不再只打印文本，而是启动一个最小可交互 TUI 主菜单。
-本步仍然不实现数据库、LangChain 调用或真实聊天功能。
+Step 4 中，入口负责创建 TUIApp，并把项目根目录传给应用。
+本步只实现用户管理，不实现预设管理、会话管理、LangChain 调用或真实聊天。
 """
 
 import asyncio
@@ -19,7 +19,7 @@ from src.ui.tui.app import TUIApp
 
 async def main() -> None:
     """创建并运行 TUI 应用。"""
-    app = TUIApp()
+    app = TUIApp(project_root=PROJECT_ROOT)
     await app.run()
 
 
