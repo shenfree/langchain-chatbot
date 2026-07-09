@@ -223,6 +223,17 @@ class SQLiteBackend(StorageBackend):
                 """,
                 (session_id, role, content, prompt_tokens, completion_tokens, now),
             )
+            # 每次新增消息时顺手更新会话更新时间和 token 统计，方便 /sessions 展示最新状态。
+            await db.execute(
+                """
+                UPDATE sessions
+                SET updated_at = ?,
+                    total_prompt_tokens = total_prompt_tokens + ?,
+                    total_completion_tokens = total_completion_tokens + ?
+                WHERE id = ?
+                """,
+                (now, prompt_tokens, completion_tokens, session_id),
+            )
             await db.commit()
             return await self._get_message_by_id(db, cursor.lastrowid)
 
@@ -391,3 +402,4 @@ class SQLiteBackend(StorageBackend):
         data = cls._row_to_dict(row)
         data["is_builtin"] = bool(data["is_builtin"])
         return Preset(**data)
+
