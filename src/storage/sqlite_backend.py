@@ -1,0 +1,324 @@
+﻿"""SQLite 存储后端实现。
+
+本模块只负责数据持久化，不负责 TUI 菜单展示，也不负责 LangChain 调用。
+Step 3 的目标是让项目具备可用的 SQLite 表结构和基础 CRUD 能力。
+"""
+
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any, AsyncIterator
+
+import aiosqlite
+
+from src.models.schemas import Message, Preset, Session, User
+from src.storage.base import StorageBackend
+
+
+class SQLiteBackend(StorageBackend):
+    """基于 SQLite 的异步存储后端。
+
+    说明：
+    1. 所有数据库操作都使用 aiosqlite。
+    2. 每个方法内部都通过 async with 建立短连接，执行完成后自动关闭。
+    3. 每次连接后都开启 PRAGMA foreign_keys，保证级联删除等外键行为生效。
+    """
+
+    def __init__(self, db_path: str | Path) -> None:
+        """初始化 SQLite 后端。"""
+        self.db_path = Path(db_path)
+
+    @asynccontextmanager
+    async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        """创建 SQLite 连接，并启用外键约束。
+
+        这里使用标准写法 async with aiosqlite.connect(...)，确保连接能正确打开和关闭。
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("PRAGMA foreign_keys = ON")
+            yield db
+
+    async def init_storage(self) -> None:
+        """初始化数据库目录和所有数据表。"""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        async with self._connect() as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    default_model TEXT,
+                    default_preset_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS presets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    is_builtin INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    preset_id INTEGER,
+                    total_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(preset_id) REFERENCES presets(id) ON DELETE SET NULL
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(user_id, key),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            await db.commit()
+
+    async def close(self) -> None:
+        """关闭存储资源。
+
+        当前实现采用短连接，连接会在 async with 退出时自动关闭。
+        """
+
+    async def create_user(self, username: str) -> User:
+        """创建用户并返回用户对象。"""
+        now = self._now()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "INSERT INTO users (username, created_at, updated_at) VALUES (?, ?, ?)",
+                (username, now, now),
+            )
+            await db.commit()
+            return await self._get_user_by_id(db, cursor.lastrowid)
+
+    async def get_user_by_username(self, username: str) -> User | None:
+        """根据用户名查询用户；不存在时返回 None。"""
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+            row = await cursor.fetchone()
+            return self._row_to_user(row) if row else None
+
+    async def list_users(self) -> list[User]:
+        """查询所有用户。"""
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT * FROM users ORDER BY id ASC")
+            rows = await cursor.fetchall()
+            return [self._row_to_user(row) for row in rows]
+
+    async def delete_user(self, user_id: int) -> None:
+        """删除指定用户，关联会话、消息和配置会通过外键级联删除。"""
+        async with self._connect() as db:
+            await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            await db.commit()
+
+    async def create_session(
+        self,
+        user_id: int,
+        title: str,
+        model_name: str,
+        preset_id: int | None = None,
+    ) -> Session:
+        """创建会话并返回会话对象。"""
+        now = self._now()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO sessions (
+                    user_id, title, model_name, preset_id,
+                    total_prompt_tokens, total_completion_tokens,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+                """,
+                (user_id, title, model_name, preset_id, now, now),
+            )
+            await db.commit()
+            return await self._get_session_by_id(db, cursor.lastrowid)
+
+    async def list_sessions(self, user_id: int) -> list[Session]:
+        """查询指定用户的所有会话。"""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC, id DESC",
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._row_to_session(row) for row in rows]
+
+    async def get_session(self, session_id: int) -> Session | None:
+        """根据会话 ID 查询会话；不存在时返回 None。"""
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+            row = await cursor.fetchone()
+            return self._row_to_session(row) if row else None
+
+    async def update_session_title(self, session_id: int, title: str) -> Session | None:
+        """更新会话标题，并返回更新后的会话；不存在时返回 None。"""
+        now = self._now()
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (title, now, session_id),
+            )
+            await db.commit()
+            cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+            row = await cursor.fetchone()
+            return self._row_to_session(row) if row else None
+
+    async def delete_session(self, session_id: int) -> None:
+        """删除指定会话，关联消息会通过外键级联删除。"""
+        async with self._connect() as db:
+            await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            await db.commit()
+
+    async def add_message(
+        self,
+        session_id: int,
+        role: str,
+        content: str,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+    ) -> Message:
+        """向会话中追加一条消息。"""
+        now = self._now()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO messages (
+                    session_id, role, content,
+                    prompt_tokens, completion_tokens, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, role, content, prompt_tokens, completion_tokens, now),
+            )
+            await db.commit()
+            return await self._get_message_by_id(db, cursor.lastrowid)
+
+    async def list_messages(self, session_id: int) -> list[Message]:
+        """查询指定会话的全部消息。"""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY id ASC",
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._row_to_message(row) for row in rows]
+
+    async def list_presets(self, user_id: int | None = None) -> list[Preset]:
+        """查询预设列表。"""
+        async with self._connect() as db:
+            if user_id is None:
+                cursor = await db.execute(
+                    "SELECT * FROM presets WHERE is_builtin = 1 OR user_id IS NULL ORDER BY id ASC"
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM presets
+                    WHERE is_builtin = 1 OR user_id IS NULL OR user_id = ?
+                    ORDER BY is_builtin DESC, id ASC
+                    """,
+                    (user_id,),
+                )
+            rows = await cursor.fetchall()
+            return [self._row_to_preset(row) for row in rows]
+
+    async def _get_user_by_id(self, db: aiosqlite.Connection, user_id: int | None) -> User:
+        """在当前连接中按 ID 查询用户。"""
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("用户创建后未能读取到记录")
+        return self._row_to_user(row)
+
+    async def _get_session_by_id(self, db: aiosqlite.Connection, session_id: int | None) -> Session:
+        """在当前连接中按 ID 查询会话。"""
+        cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("会话创建后未能读取到记录")
+        return self._row_to_session(row)
+
+    async def _get_message_by_id(self, db: aiosqlite.Connection, message_id: int | None) -> Message:
+        """在当前连接中按 ID 查询消息。"""
+        cursor = await db.execute("SELECT * FROM messages WHERE id = ?", (message_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("消息创建后未能读取到记录")
+        return self._row_to_message(row)
+
+    @staticmethod
+    def _now() -> str:
+        """生成当前时间字符串，统一使用 ISO 格式保存到 SQLite。"""
+        return datetime.now().isoformat()
+
+    @staticmethod
+    def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
+        """把 aiosqlite.Row 转成普通字典，方便传给 Pydantic 模型。"""
+        return dict(row)
+
+    @classmethod
+    def _row_to_user(cls, row: aiosqlite.Row) -> User:
+        """把 users 表记录转换为 User 模型。"""
+        return User(**cls._row_to_dict(row))
+
+    @classmethod
+    def _row_to_session(cls, row: aiosqlite.Row) -> Session:
+        """把 sessions 表记录转换为 Session 模型。"""
+        return Session(**cls._row_to_dict(row))
+
+    @classmethod
+    def _row_to_message(cls, row: aiosqlite.Row) -> Message:
+        """把 messages 表记录转换为 Message 模型。"""
+        return Message(**cls._row_to_dict(row))
+
+    @classmethod
+    def _row_to_preset(cls, row: aiosqlite.Row) -> Preset:
+        """把 presets 表记录转换为 Preset 模型。"""
+        data = cls._row_to_dict(row)
+        data["is_builtin"] = bool(data["is_builtin"])
+        return Preset(**data)

@@ -1,5 +1,5 @@
-# LangChain Chat 全局配置文件
-# Step 1 只建立配置骨架，后续步骤再逐步读取和使用。
+﻿# LangChain Chat 全局配置文件
+# Step 3 开始，storage.sqlite.path 会被 SQLite 初始化脚本读取。
 
 app:
   name: langchain-chat
@@ -12,7 +12,8 @@ model:
 
 storage:
   type: sqlite
-  sqlite_path: data/langchain_chat.db
+  sqlite:
+    path: data/sqlite/app.db
 
 tui:
   theme: default
