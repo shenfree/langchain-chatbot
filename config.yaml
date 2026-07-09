@@ -1,0 +1,18 @@
+# LangChain Chat 全局配置文件
+# Step 1 只建立配置骨架，后续步骤再逐步读取和使用。
+
+app:
+  name: langchain-chat
+  version: 0.1.0
+  env: development
+
+model:
+  default_provider: openai
+  default_model: gpt-4o-mini
+
+storage:
+  type: sqlite
+  sqlite_path: data/langchain_chat.db
+
+tui:
+  theme: default

@@ -1,0 +1,36 @@
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# uv 生成的锁文件可提交；这里不忽略 uv.lock
+
+# 本地环境变量文件，避免 API Key 被提交
+.env
+.env.*
+!.env.example
+
+# 测试、覆盖率与构建产物
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 运行日志和本地数据
+logs/
+data/
+*.log

@@ -1,0 +1,9 @@
+# 模型与会话预设配置
+# Step 1 暂不加载，本文件用于后续扩展多模型对比、角色预设等能力。
+
+presets:
+  default:
+    name: 默认助手
+    description: 通用多轮会话助手
+    temperature: 0.7
+    max_tokens: 1024

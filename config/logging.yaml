@@ -1,0 +1,21 @@
+# 日志配置骨架
+# Step 1 暂不加载，后续步骤会接入统一日志系统。
+
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  standard:
+    format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: standard
+    stream: ext://sys.stdout
+
+root:
+  level: INFO
+  handlers:
+    - console
