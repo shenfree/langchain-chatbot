@@ -1,5 +1,5 @@
 ﻿# LangChain Chat 全局配置文件
-# Step 3 开始，storage.sqlite.path 会被 SQLite 初始化脚本读取。
+# Step 6 增加 llm 配置，ChatEngine 会优先读取 .env 中的模型连接信息。
 
 app:
   name: langchain-chat
@@ -9,6 +9,11 @@ app:
 model:
   default_provider: openai
   default_model: gpt-4o-mini
+
+llm:
+  timeout: 60
+  max_retries: 3
+  temperature: 0.7
 
 storage:
   type: sqlite
