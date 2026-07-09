@@ -1,7 +1,7 @@
 ﻿"""SQLite 存储后端实现。
 
 本模块只负责数据持久化，不负责 TUI 菜单展示，也不负责 LangChain 调用。
-Step 3 的目标是让项目具备可用的 SQLite 表结构和基础 CRUD 能力。
+Step 5 在 Step 3 基础上补充了预设 Prompt 的 CRUD 能力。
 """
 
 from contextlib import asynccontextmanager
@@ -16,13 +16,7 @@ from src.storage.base import StorageBackend
 
 
 class SQLiteBackend(StorageBackend):
-    """基于 SQLite 的异步存储后端。
-
-    说明：
-    1. 所有数据库操作都使用 aiosqlite。
-    2. 每个方法内部都通过 async with 建立短连接，执行完成后自动关闭。
-    3. 每次连接后都开启 PRAGMA foreign_keys，保证级联删除等外键行为生效。
-    """
+    """基于 SQLite 的异步存储后端。"""
 
     def __init__(self, db_path: str | Path) -> None:
         """初始化 SQLite 后端。"""
@@ -30,10 +24,7 @@ class SQLiteBackend(StorageBackend):
 
     @asynccontextmanager
     async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
-        """创建 SQLite 连接，并启用外键约束。
-
-        这里使用标准写法 async with aiosqlite.connect(...)，确保连接能正确打开和关闭。
-        """
+        """创建 SQLite 连接，并启用外键约束。"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA foreign_keys = ON")
@@ -118,10 +109,7 @@ class SQLiteBackend(StorageBackend):
             await db.commit()
 
     async def close(self) -> None:
-        """关闭存储资源。
-
-        当前实现采用短连接，连接会在 async with 退出时自动关闭。
-        """
+        """关闭存储资源。当前实现采用短连接，无需额外操作。"""
 
     async def create_user(self, username: str) -> User:
         """创建用户并返回用户对象。"""
@@ -135,7 +123,7 @@ class SQLiteBackend(StorageBackend):
             return await self._get_user_by_id(db, cursor.lastrowid)
 
     async def get_user_by_username(self, username: str) -> User | None:
-        """根据用户名查询用户；不存在时返回 None。"""
+        """根据用户名查询用户。"""
         async with self._connect() as db:
             cursor = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
             row = await cursor.fetchone()
@@ -149,7 +137,7 @@ class SQLiteBackend(StorageBackend):
             return [self._row_to_user(row) for row in rows]
 
     async def delete_user(self, user_id: int) -> None:
-        """删除指定用户，关联会话、消息和配置会通过外键级联删除。"""
+        """删除指定用户，关联数据依赖外键级联删除。"""
         async with self._connect() as db:
             await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
             await db.commit()
@@ -189,14 +177,14 @@ class SQLiteBackend(StorageBackend):
             return [self._row_to_session(row) for row in rows]
 
     async def get_session(self, session_id: int) -> Session | None:
-        """根据会话 ID 查询会话；不存在时返回 None。"""
+        """根据会话 ID 查询会话。"""
         async with self._connect() as db:
             cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
             row = await cursor.fetchone()
             return self._row_to_session(row) if row else None
 
     async def update_session_title(self, session_id: int, title: str) -> Session | None:
-        """更新会话标题，并返回更新后的会话；不存在时返回 None。"""
+        """更新会话标题。"""
         now = self._now()
         async with self._connect() as db:
             await db.execute(
@@ -209,7 +197,7 @@ class SQLiteBackend(StorageBackend):
             return self._row_to_session(row) if row else None
 
     async def delete_session(self, session_id: int) -> None:
-        """删除指定会话，关联消息会通过外键级联删除。"""
+        """删除指定会话。"""
         async with self._connect() as db:
             await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             await db.commit()
@@ -248,24 +236,97 @@ class SQLiteBackend(StorageBackend):
             rows = await cursor.fetchall()
             return [self._row_to_message(row) for row in rows]
 
+    async def create_preset(
+        self,
+        user_id: int | None,
+        name: str,
+        description: str,
+        system_prompt: str,
+        is_builtin: bool = False,
+    ) -> Preset:
+        """创建预设 Prompt。"""
+        now = self._now()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO presets (
+                    user_id, name, description, system_prompt,
+                    is_builtin, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, name, description, system_prompt, int(is_builtin), now, now),
+            )
+            await db.commit()
+            return await self._get_preset_by_id(db, cursor.lastrowid)
+
+    async def get_preset(self, preset_id: int) -> Preset | None:
+        """根据 ID 查询预设。"""
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT * FROM presets WHERE id = ?", (preset_id,))
+            row = await cursor.fetchone()
+            return self._row_to_preset(row) if row else None
+
     async def list_presets(self, user_id: int | None = None) -> list[Preset]:
-        """查询预设列表。"""
+        """查询预设列表。
+
+        user_id 为空时只返回系统内置预设；传入用户 ID 时返回系统内置预设和该用户预设。
+        """
         async with self._connect() as db:
             if user_id is None:
                 cursor = await db.execute(
-                    "SELECT * FROM presets WHERE is_builtin = 1 OR user_id IS NULL ORDER BY id ASC"
+                    "SELECT * FROM presets WHERE is_builtin = 1 ORDER BY id ASC"
                 )
             else:
                 cursor = await db.execute(
                     """
                     SELECT * FROM presets
-                    WHERE is_builtin = 1 OR user_id IS NULL OR user_id = ?
+                    WHERE is_builtin = 1 OR user_id = ?
                     ORDER BY is_builtin DESC, id ASC
                     """,
                     (user_id,),
                 )
             rows = await cursor.fetchall()
             return [self._row_to_preset(row) for row in rows]
+
+    async def update_preset(
+        self,
+        preset_id: int,
+        name: str,
+        description: str,
+        system_prompt: str,
+    ) -> Preset:
+        """更新非内置预设。"""
+        preset = await self.get_preset(preset_id)
+        if preset is None:
+            raise ValueError(f"预设 ID {preset_id} 不存在。")
+        if preset.is_builtin:
+            raise ValueError("系统内置预设不允许修改。")
+
+        now = self._now()
+        async with self._connect() as db:
+            await db.execute(
+                """
+                UPDATE presets
+                SET name = ?, description = ?, system_prompt = ?, updated_at = ?
+                WHERE id = ? AND is_builtin = 0
+                """,
+                (name, description, system_prompt, now, preset_id),
+            )
+            await db.commit()
+            return await self._get_preset_by_id(db, preset_id)
+
+    async def delete_preset(self, preset_id: int) -> None:
+        """删除非内置预设。"""
+        preset = await self.get_preset(preset_id)
+        if preset is None:
+            raise ValueError(f"预设 ID {preset_id} 不存在。")
+        if preset.is_builtin:
+            raise ValueError("系统内置预设不允许删除。")
+
+        async with self._connect() as db:
+            await db.execute("DELETE FROM presets WHERE id = ? AND is_builtin = 0", (preset_id,))
+            await db.commit()
 
     async def _get_user_by_id(self, db: aiosqlite.Connection, user_id: int | None) -> User:
         """在当前连接中按 ID 查询用户。"""
@@ -290,6 +351,14 @@ class SQLiteBackend(StorageBackend):
         if row is None:
             raise RuntimeError("消息创建后未能读取到记录")
         return self._row_to_message(row)
+
+    async def _get_preset_by_id(self, db: aiosqlite.Connection, preset_id: int | None) -> Preset:
+        """在当前连接中按 ID 查询预设。"""
+        cursor = await db.execute("SELECT * FROM presets WHERE id = ?", (preset_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("预设写入后未能读取到记录")
+        return self._row_to_preset(row)
 
     @staticmethod
     def _now() -> str:

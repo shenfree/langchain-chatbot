@@ -21,12 +21,17 @@ USER_MENU_OPTIONS = {
     "0": "返回主菜单",
 }
 
+PRESET_MENU_OPTIONS = {
+    "1": "查看预设列表",
+    "2": "新增个人预设",
+    "3": "编辑个人预设",
+    "4": "删除个人预设",
+    "0": "返回主菜单",
+}
+
 
 def render_main_menu() -> None:
-    """渲染主菜单。
-
-    本函数只负责展示，不处理用户输入，输入逻辑由 TUIApp 统一管理。
-    """
+    """渲染主菜单。"""
     print_blank_line()
     print_title("LangChain Chat")
 
@@ -37,14 +42,22 @@ def render_main_menu() -> None:
 
 
 def render_user_menu() -> None:
-    """渲染用户管理子菜单。
-
-    这里只展示菜单项，不包含任何业务逻辑。
-    """
+    """渲染用户管理子菜单。"""
     print_blank_line()
     print_title("用户管理")
 
     for key, label in USER_MENU_OPTIONS.items():
+        console.print(f"[bold]{key}.[/bold] {label}")
+
+    print_blank_line()
+
+
+def render_preset_menu() -> None:
+    """渲染预设管理子菜单。"""
+    print_blank_line()
+    print_title("预设管理")
+
+    for key, label in PRESET_MENU_OPTIONS.items():
         console.print(f"[bold]{key}.[/bold] {label}")
 
     print_blank_line()

@@ -1,7 +1,7 @@
 ﻿"""存储后端抽象接口。
 
-Step 2 只定义存储层应该具备哪些能力，不实现任何真实数据库逻辑。
-后续 SQLite、MySQL 或其他存储后端都可以实现这个抽象基类。
+本模块只定义存储层能力，不绑定具体数据库实现。
+SQLite、MySQL 或其他存储后端都应该实现这个抽象基类。
 """
 
 from abc import ABC, abstractmethod
@@ -17,17 +17,11 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def init_storage(self) -> None:
-        """初始化存储资源。
-
-        例如后续 SQLite 后端会在这里建立连接、创建表结构等。
-        """
+        """初始化存储资源。"""
 
     @abstractmethod
     async def close(self) -> None:
-        """关闭存储资源。
-
-        例如关闭数据库连接，释放文件句柄等。
-        """
+        """关闭存储资源。"""
 
     @abstractmethod
     async def create_user(self, username: str) -> User:
@@ -87,8 +81,34 @@ class StorageBackend(ABC):
         """查询指定会话的全部消息。"""
 
     @abstractmethod
-    async def list_presets(self, user_id: int | None = None) -> list[Preset]:
-        """查询预设列表。
+    async def create_preset(
+        self,
+        user_id: int | None,
+        name: str,
+        description: str,
+        system_prompt: str,
+        is_builtin: bool = False,
+    ) -> Preset:
+        """创建预设 Prompt。"""
 
-        user_id 为空时，可以返回内置预设；传入 user_id 时，可以返回该用户可用的预设。
-        """
+    @abstractmethod
+    async def get_preset(self, preset_id: int) -> Preset | None:
+        """根据 ID 查询预设；不存在时返回 None。"""
+
+    @abstractmethod
+    async def list_presets(self, user_id: int | None = None) -> list[Preset]:
+        """查询预设列表。"""
+
+    @abstractmethod
+    async def update_preset(
+        self,
+        preset_id: int,
+        name: str,
+        description: str,
+        system_prompt: str,
+    ) -> Preset:
+        """更新非内置预设。"""
+
+    @abstractmethod
+    async def delete_preset(self, preset_id: int) -> None:
+        """删除非内置预设。"""
