@@ -247,6 +247,36 @@ class SQLiteBackend(StorageBackend):
             rows = await cursor.fetchall()
             return [self._row_to_message(row) for row in rows]
 
+    async def search_messages(self, user_id: int, keyword: str) -> list[dict]:
+        """在指定用户的所有历史消息中搜索关键词。
+
+        通过 JOIN sessions 并限制 sessions.user_id，确保不会搜索到其他用户的数据。
+        """
+        cleaned_keyword = keyword.strip()
+        if not cleaned_keyword:
+            return []
+
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT
+                    messages.id AS message_id,
+                    messages.session_id,
+                    sessions.title AS session_title,
+                    messages.role,
+                    messages.content,
+                    messages.created_at
+                FROM messages
+                JOIN sessions ON messages.session_id = sessions.id
+                WHERE sessions.user_id = ?
+                  AND messages.content LIKE ?
+                ORDER BY messages.created_at DESC
+                """,
+                (user_id, f"%{cleaned_keyword}%"),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
     async def create_preset(
         self,
         user_id: int | None,
@@ -402,4 +432,5 @@ class SQLiteBackend(StorageBackend):
         data = cls._row_to_dict(row)
         data["is_builtin"] = bool(data["is_builtin"])
         return Preset(**data)
+
 

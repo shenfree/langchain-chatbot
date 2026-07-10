@@ -28,12 +28,14 @@ class ChatEngine:
         self,
         config_manager: ConfigManager,
         system_prompt: str | None = None,
+        model_name: str | None = None,
     ) -> None:
         """初始化对话引擎。
 
         Args:
             config_manager: 配置管理器，用于读取 .env 和 config.yaml。
             system_prompt: 默认系统提示词；stream_chat 可传入新的 system_prompt 覆盖它。
+            model_name: 可选模型名，用于加载历史会话时沿用会话原模型。
 
         Raises:
             ValueError: 当 .env 中没有配置 API_KEY 时抛出清晰错误。
@@ -46,7 +48,7 @@ class ChatEngine:
             "API_BASE_URL",
             "https://api.deepseek.com/v1",
         )
-        self.model_name = self.config_manager.get_env("MODEL_NAME", "deepseek-chat")
+        self.model_name = model_name or self.config_manager.get_env("MODEL_NAME", "deepseek-chat")
 
         config = self.config_manager.get_config()
         llm_config = config.get("llm", {})
@@ -199,3 +201,7 @@ class ChatEngine:
                 f"缺少环境变量 {name}。请复制 .env.example 为 .env，并填写真实 API Key。"
             )
         return value.strip()
+
+
+
+

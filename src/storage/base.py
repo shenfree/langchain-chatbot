@@ -81,6 +81,10 @@ class StorageBackend(ABC):
         """查询指定会话的全部消息。"""
 
     @abstractmethod
+    async def search_messages(self, user_id: int, keyword: str) -> list[dict]:
+        """在指定用户的所有历史消息中搜索关键词。"""
+
+    @abstractmethod
     async def create_preset(
         self,
         user_id: int | None,
@@ -112,3 +116,4 @@ class StorageBackend(ABC):
     @abstractmethod
     async def delete_preset(self, preset_id: int) -> None:
         """删除非内置预设。"""
+

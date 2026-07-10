@@ -1,7 +1,7 @@
 ﻿"""TUI 应用主程序。
 
 本模块负责组织命令行界面的主循环：显示菜单、读取输入、分发到对应功能。
-Step 7 接入真实多轮流式对话；会话加载、重命名、删除、搜索、导出仍留到后续步骤。
+Step 8 完善会话管理：列表、加载、重命名、删除，以及聊天循环中的 /load、/rename、/delete。
 """
 
 import asyncio
@@ -21,16 +21,20 @@ from src.storage.factory import StorageFactory
 from src.ui.tui.chat_view import (
     render_chat_header,
     render_chat_help,
+    render_loaded_session,
     render_new_session_created,
     render_preset_choices,
+    render_search_results,
     render_sessions_table,
 )
 from src.ui.tui.menu_view import (
     MENU_OPTIONS,
     PRESET_MENU_OPTIONS,
+    SESSION_MENU_OPTIONS,
     USER_MENU_OPTIONS,
     render_main_menu,
     render_preset_menu,
+    render_session_menu,
     render_user_menu,
 )
 from src.ui.tui.widgets import console, print_error, print_info, print_warning
@@ -89,10 +93,16 @@ class TUIApp(AbstractUI):
             return None
 
     async def _prompt_text(self, message: str) -> str:
-        """异步读取用户输入。"""
-        if self.prompt_session is not None:
-            return await self.prompt_session.prompt_async(message)
-        return await asyncio.to_thread(input, message)
+        """异步读取用户输入。
+
+        自动化管道输入结束时可能抛出 EOFError，这里返回 0 让当前菜单安全退出。
+        """
+        try:
+            if self.prompt_session is not None:
+                return await self.prompt_session.prompt_async(message)
+            return await asyncio.to_thread(input, message)
+        except EOFError:
+            return "0"
 
     async def handle_choice(self, choice: str) -> None:
         """根据主菜单输入分发动作。"""
@@ -101,13 +111,15 @@ class TUIApp(AbstractUI):
         elif choice == "1":
             await self.show_user_menu()
         elif choice == "2":
-            await self.show_stub("会话管理")
+            await self.show_session_menu()
         elif choice == "3":
             await self.show_preset_menu()
         elif choice == "4":
             await self.start_chat_flow()
         elif choice == "5":
             await self.show_stub("设置")
+        elif choice == "6":
+            await self.search_messages_flow()
         else:
             valid_options = "、".join(MENU_OPTIONS.keys())
             print_error(f"无效输入：{choice or '空输入'}。请输入以下编号之一：{valid_options}")
@@ -117,7 +129,6 @@ class TUIApp(AbstractUI):
         while self.is_running:
             render_user_menu()
             choice = (await self._prompt_text("请选择用户管理功能编号：")).strip()
-
             if choice == "0":
                 return
             if choice == "1":
@@ -134,12 +145,32 @@ class TUIApp(AbstractUI):
                 valid_options = "、".join(USER_MENU_OPTIONS.keys())
                 print_error(f"无效输入：{choice or '空输入'}。请输入以下编号之一：{valid_options}")
 
+    async def show_session_menu(self) -> None:
+        """显示并处理会话管理子菜单。"""
+        while self.is_running:
+            render_session_menu()
+            choice = (await self._prompt_text("请选择会话管理功能编号：")).strip()
+            if choice == "0":
+                return
+            if choice == "1":
+                await self.list_sessions_flow()
+            elif choice == "2":
+                await self.load_session_flow()
+            elif choice == "3":
+                await self.rename_session_flow()
+            elif choice == "4":
+                await self.delete_session_flow()
+            elif choice == "5":
+                await self.start_chat_flow()
+            else:
+                valid_options = "、".join(SESSION_MENU_OPTIONS.keys())
+                print_error(f"无效输入：{choice or '空输入'}。请输入以下编号之一：{valid_options}")
+
     async def show_preset_menu(self) -> None:
         """显示并处理预设管理子菜单。"""
         while self.is_running:
             render_preset_menu()
             choice = (await self._prompt_text("请选择预设管理功能编号：")).strip()
-
             if choice == "0":
                 return
             if choice == "1":
@@ -155,10 +186,9 @@ class TUIApp(AbstractUI):
                 print_error(f"无效输入：{choice or '空输入'}。请输入以下编号之一：{valid_options}")
 
     async def start_chat_flow(self) -> None:
-        """启动真实聊天流程。"""
-        current_user = self._require_user_manager().get_current_user()
-        if current_user is None or current_user.id is None:
-            print_warning("请先在用户管理中创建并切换用户。")
+        """新建会话并开始对话。"""
+        current_user = self._require_current_user()
+        if current_user is None:
             return
 
         chat_engine = self._get_or_create_chat_engine()
@@ -170,16 +200,34 @@ class TUIApp(AbstractUI):
         render_new_session_created(session)
         render_chat_header(current_user.username, chat_engine.model_name, selected_preset)
         render_chat_help()
+        await self.chat_loop(current_user, chat_engine, session, selected_preset)
 
-        await self.chat_loop(
-            current_user=current_user,
-            chat_engine=chat_engine,
-            session=session,
-            selected_preset=selected_preset,
-        )
+    async def load_session_flow(self) -> None:
+        """从会话管理菜单加载历史会话继续对话。"""
+        current_user = self._require_current_user()
+        if current_user is None:
+            return
+
+        session = await self.prompt_session_from_current_user(current_user)
+        if session is None:
+            return
+
+        await self.continue_loaded_session(current_user, session)
+
+    async def continue_loaded_session(self, current_user: User, session: Session) -> None:
+        """加载已有会话并进入聊天循环。"""
+        selected_preset = await self.get_session_preset(session)
+        chat_engine = self._get_or_create_chat_engine(model_name=session.model_name)
+        if chat_engine is None:
+            return
+
+        render_loaded_session(session, selected_preset)
+        render_chat_header(current_user.username, session.model_name, selected_preset)
+        render_chat_help()
+        await self.chat_loop(current_user, chat_engine, session, selected_preset)
 
     async def select_preset_for_chat(self, current_user: User) -> Preset | None:
-        """让用户为本次新会话选择预设。"""
+        """让用户为新会话选择预设。"""
         presets = await self._require_preset_manager().list_presets(user_id=current_user.id)
         render_preset_choices(presets)
         raw_value = (await self._prompt_text("请输入 preset_id，或直接回车跳过：")).strip()
@@ -225,33 +273,33 @@ class TUIApp(AbstractUI):
     ) -> None:
         """聊天循环，处理普通消息和聊天命令。"""
         active_session = session
-        system_prompt = selected_preset.system_prompt if selected_preset else None
+        active_preset = selected_preset
 
         while self.is_running:
             user_input = (await self._prompt_text("\n你：")).strip()
             if not user_input:
                 continue
 
-            command_handled, maybe_new_session = await self.handle_chat_command(
+            result = await self.handle_chat_command(
                 command=user_input,
                 current_user=current_user,
                 chat_engine=chat_engine,
                 current_session=active_session,
-                selected_preset=selected_preset,
+                selected_preset=active_preset,
             )
-            if maybe_new_session is not None:
-                active_session = maybe_new_session
-            if command_handled:
-                if user_input == "/exit":
+            if result["new_session"] is not None:
+                active_session = result["new_session"]
+            if result["new_preset"] is not None or result["preset_changed"]:
+                active_preset = result["new_preset"]
+            if result["new_engine"] is not None:
+                chat_engine = result["new_engine"]
+            if result["handled"]:
+                if result["exit_chat"]:
                     return
                 continue
 
-            await self.handle_chat_message(
-                session=active_session,
-                chat_engine=chat_engine,
-                user_input=user_input,
-                system_prompt=system_prompt,
-            )
+            system_prompt = active_preset.system_prompt if active_preset else None
+            await self.handle_chat_message(active_session, chat_engine, user_input, system_prompt)
 
     async def handle_chat_command(
         self,
@@ -260,34 +308,57 @@ class TUIApp(AbstractUI):
         chat_engine: ChatEngine,
         current_session: Session,
         selected_preset: Preset | None,
-    ) -> tuple[bool, Session | None]:
+    ) -> dict[str, object]:
         """处理聊天命令。"""
+        result: dict[str, object] = {
+            "handled": False,
+            "exit_chat": False,
+            "new_session": None,
+            "new_preset": None,
+            "new_engine": None,
+            "preset_changed": False,
+        }
         if not command.startswith("/"):
-            return False, None
+            return result
 
+        result["handled"] = True
         if command == "/exit":
             print_info("已返回主菜单。")
-            return True, None
-
-        if command == "/help":
+            result["exit_chat"] = True
+        elif command == "/help":
             render_chat_help()
-            return True, None
-
-        if command == "/model":
-            print_info(f"当前模型：{chat_engine.model_name}")
-            return True, None
-
-        if command == "/sessions":
+        elif command == "/model":
+            print_info(f"当前模型：{current_session.model_name}")
+        elif command == "/sessions":
             await self.show_chat_sessions(current_user)
-            return True, None
-
-        if command == "/new":
+        elif command == "/new":
             new_session = await self._create_chat_session(current_user, chat_engine, selected_preset)
             render_new_session_created(new_session)
-            return True, new_session
-
-        print_warning("未知命令，输入 /help 查看可用命令。")
-        return True, None
+            result["new_session"] = new_session
+        elif command == "/rename":
+            renamed = await self.rename_specific_session(current_user, current_session)
+            if renamed is not None:
+                result["new_session"] = renamed
+        elif command == "/delete":
+            deleted = await self.delete_specific_session(current_user, current_session)
+            if deleted:
+                result["exit_chat"] = True
+        elif command == "/search":
+            await self.search_messages_flow()
+        elif command == "/load":
+            loaded_session = await self.prompt_session_from_current_user(current_user)
+            if loaded_session is not None:
+                loaded_preset = await self.get_session_preset(loaded_session)
+                loaded_engine = self._get_or_create_chat_engine(model_name=loaded_session.model_name)
+                if loaded_engine is not None:
+                    render_loaded_session(loaded_session, loaded_preset)
+                    result["new_session"] = loaded_session
+                    result["new_preset"] = loaded_preset
+                    result["new_engine"] = loaded_engine
+                    result["preset_changed"] = True
+        else:
+            print_warning("未知命令，输入 /help 查看可用命令。")
+        return result
 
     async def handle_chat_message(
         self,
@@ -323,12 +394,108 @@ class TUIApp(AbstractUI):
                 await self._require_session_manager().add_ai_message(session.id, ai_content)
 
             if is_first_user_message:
-                await self._require_session_manager().auto_title_from_first_message(
-                    session.id,
-                    user_input,
-                )
+                await self._require_session_manager().auto_title_from_first_message(session.id, user_input)
         except Exception as exc:
             print_error(f"模型调用失败：{exc}")
+
+    async def list_sessions_flow(self) -> None:
+        """查看当前用户会话列表。"""
+        current_user = self._require_current_user()
+        if current_user is None:
+            return
+        await self.show_chat_sessions(current_user)
+
+    async def search_messages_flow(self) -> None:
+        """搜索当前用户历史消息。
+
+        TUI 只负责读取关键词和展示结果；关键词校验和搜索逻辑由 SessionManager 完成。
+        """
+        current_user = self._require_current_user()
+        if current_user is None:
+            return
+
+        keyword = await self._prompt_text("请输入搜索关键词：")
+        try:
+            results = await self._require_session_manager().search_messages(current_user.id, keyword)  # type: ignore[arg-type]
+            render_search_results(results)
+        except ValueError as exc:
+            print_error(str(exc))
+
+    async def rename_session_flow(self) -> None:
+        """会话管理菜单中的重命名流程。"""
+        current_user = self._require_current_user()
+        if current_user is None:
+            return
+        session = await self.prompt_session_from_current_user(current_user)
+        if session is None:
+            return
+        await self.rename_specific_session(current_user, session)
+
+    async def delete_session_flow(self) -> None:
+        """会话管理菜单中的删除流程。"""
+        current_user = self._require_current_user()
+        if current_user is None:
+            return
+        session = await self.prompt_session_from_current_user(current_user)
+        if session is None:
+            return
+        await self.delete_specific_session(current_user, session)
+
+    async def rename_specific_session(self, current_user: User, session: Session) -> Session | None:
+        """重命名指定会话。"""
+        if not self._session_belongs_to_user(session, current_user):
+            print_error("该会话不属于当前用户。")
+            return None
+        new_title = await self._prompt_text("请输入新的会话标题：")
+        try:
+            renamed = await self._require_session_manager().rename_session(session.id, new_title)  # type: ignore[arg-type]
+            print_info(f"会话已重命名：{renamed.title}")
+            return renamed
+        except ValueError as exc:
+            print_error(str(exc))
+            return None
+
+    async def delete_specific_session(self, current_user: User, session: Session) -> bool:
+        """删除指定会话。"""
+        if not self._session_belongs_to_user(session, current_user):
+            print_error("该会话不属于当前用户。")
+            return False
+        confirm = await self._prompt_text("确认删除该会话及其全部消息？输入 yes 确认：")
+        if confirm.strip().lower() != "yes":
+            print_warning("已取消删除。")
+            return False
+        try:
+            await self._require_session_manager().delete_session(session.id)  # type: ignore[arg-type]
+            print_info(f"会话已删除：ID={session.id}")
+            return True
+        except ValueError as exc:
+            print_error(str(exc))
+            return False
+
+    async def prompt_session_from_current_user(self, current_user: User) -> Session | None:
+        """展示当前用户会话列表，并让用户输入 session_id。"""
+        await self.show_chat_sessions(current_user)
+        raw_session_id = (await self._prompt_text("请输入 session_id：")).strip()
+        try:
+            session_id = int(raw_session_id)
+        except ValueError:
+            print_error("session_id 必须是数字。")
+            return None
+
+        session = await self._require_session_manager().get_session(session_id)
+        if session is None:
+            print_error(f"会话 ID {session_id} 不存在。")
+            return None
+        if not self._session_belongs_to_user(session, current_user):
+            print_error("该会话不属于当前用户。")
+            return None
+        return session
+
+    async def get_session_preset(self, session: Session) -> Preset | None:
+        """读取会话关联的预设。"""
+        if session.preset_id is None:
+            return None
+        return await self._require_preset_manager().get_preset(session.preset_id)
 
     async def show_chat_sessions(self, current_user: User) -> None:
         """显示当前用户会话列表。"""
@@ -338,16 +505,27 @@ class TUIApp(AbstractUI):
         sessions = await self._require_session_manager().list_sessions(current_user.id)
         render_sessions_table(sessions)
 
-    def _get_or_create_chat_engine(self) -> ChatEngine | None:
-        """按需创建 ChatEngine。
+    def _session_belongs_to_user(self, session: Session, current_user: User) -> bool:
+        """校验会话是否属于当前用户。"""
+        return current_user.id is not None and session.user_id == current_user.id
 
-        这样 API Key 没配置时，不会影响用户管理和预设管理菜单。
-        """
-        if self.chat_engine is not None:
+    def _require_current_user(self) -> User | None:
+        """获取当前用户；未选择用户时给出提示。"""
+        current_user = self._require_user_manager().get_current_user()
+        if current_user is None or current_user.id is None:
+            print_warning("请先在用户管理中创建并切换用户。")
+            return None
+        return current_user
+
+    def _get_or_create_chat_engine(self, model_name: str | None = None) -> ChatEngine | None:
+        """按需创建 ChatEngine。"""
+        if self.chat_engine is not None and (model_name is None or self.chat_engine.model_name == model_name):
             return self.chat_engine
-
         try:
-            self.chat_engine = ChatEngine(config_manager=self._require_config_manager())
+            self.chat_engine = ChatEngine(
+                config_manager=self._require_config_manager(),
+                model_name=model_name,
+            )
             return self.chat_engine
         except ValueError as exc:
             print_error(str(exc))
@@ -397,7 +575,6 @@ class TUIApp(AbstractUI):
         if not users:
             print_warning("暂无用户。")
             return
-
         console.print("[bold]用户列表：[/bold]")
         for user in users:
             console.print(f"- {user.username}")
@@ -418,7 +595,6 @@ class TUIApp(AbstractUI):
         if confirm.strip().lower() != "yes":
             print_warning("已取消删除。")
             return
-
         try:
             await self._require_user_manager().delete_user(username)
             print_info(f"用户已删除：{username.strip()}")
@@ -440,7 +616,6 @@ class TUIApp(AbstractUI):
         if not presets:
             print_warning("暂无预设。")
             return
-
         console.print("[bold]预设列表：[/bold]")
         for preset in presets:
             preset_type = "系统内置" if preset.is_builtin else "个人预设"
@@ -453,7 +628,6 @@ class TUIApp(AbstractUI):
         if current_user is None or current_user.id is None:
             print_warning("请先选择当前用户，再新增个人预设。")
             return
-
         name = await self._prompt_text("请输入预设名称：")
         description = await self._prompt_text("请输入预设说明：")
         system_prompt = await self._prompt_text("请输入 system_prompt：")
@@ -473,11 +647,9 @@ class TUIApp(AbstractUI):
         if self._get_current_user_id() is None:
             print_warning("请先选择当前用户，再编辑个人预设。")
             return
-
         preset_id = await self._prompt_preset_id("请输入要编辑的 preset_id：")
         if preset_id is None:
             return
-
         name = await self._prompt_text("请输入新的预设名称：")
         description = await self._prompt_text("请输入新的预设说明：")
         system_prompt = await self._prompt_text("请输入新的 system_prompt：")
@@ -497,16 +669,13 @@ class TUIApp(AbstractUI):
         if self._get_current_user_id() is None:
             print_warning("请先选择当前用户，再删除个人预设。")
             return
-
         preset_id = await self._prompt_preset_id("请输入要删除的 preset_id：")
         if preset_id is None:
             return
-
         confirm = await self._prompt_text("确认删除该个人预设？输入 yes 确认：")
         if confirm.strip().lower() != "yes":
             print_warning("已取消删除。")
             return
-
         try:
             await self._require_preset_manager().delete_user_preset(preset_id)
             print_info(f"个人预设已删除，ID: {preset_id}")
@@ -530,3 +699,5 @@ class TUIApp(AbstractUI):
         """退出 TUI 应用。"""
         self.is_running = False
         print_info("程序已退出。")
+
+
