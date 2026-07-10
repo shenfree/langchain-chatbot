@@ -3,7 +3,7 @@
 运行方式：
     uv run python scripts/init_db.py
 
-本脚本只负责初始化 SQLite 数据库和数据表，不插入业务数据，也不启动 TUI。
+本脚本只负责根据 config.yaml 初始化当前选择的存储后端，不插入业务数据，也不启动 TUI。
 """
 
 import asyncio
@@ -21,17 +21,29 @@ from src.storage.factory import StorageFactory
 
 
 async def main() -> None:
-    """读取配置并初始化数据库。"""
+    """读取配置并初始化当前存储后端。"""
     config_manager = ConfigManager(project_root=PROJECT_ROOT)
     config = config_manager.get_config()
+    storage_config = config.get("storage", {})
+    storage_type = storage_config.get("type", "sqlite")
 
     storage = StorageFactory.create(config, project_root=PROJECT_ROOT)
-    await storage.init_storage()
-    await storage.close()
+    try:
+        await storage.init_storage()
+    finally:
+        await storage.close()
 
-    storage_config = config.get("storage", {})
-    sqlite_path = storage_config.get("sqlite", {}).get("path", "data/sqlite/app.db")
-    print(f"SQLite 数据库初始化完成：{sqlite_path}")
+    if storage_type == "sqlite":
+        sqlite_path = storage_config.get("sqlite", {}).get("path", "data/sqlite/app.db")
+        print(f"SQLite 数据库初始化完成：{sqlite_path}")
+        return
+
+    if storage_type == "mysql":
+        database = storage_config.get("mysql", {}).get("database", "langchain_chat")
+        print(f"MySQL 数据库初始化完成：{database}")
+        return
+
+    print(f"{storage_type} 存储初始化完成")
 
 
 if __name__ == "__main__":

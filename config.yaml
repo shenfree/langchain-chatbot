@@ -32,6 +32,12 @@ storage:
   type: sqlite
   sqlite:
     path: data/sqlite/app.db
+  mysql:
+    host: localhost
+    port: 3306
+    user: root
+    database: langchain_chat
+    charset: utf8mb4
 
 tui:
   theme: default
