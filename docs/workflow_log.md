@@ -106,3 +106,9 @@
 - 修改内容：新增 `backend/`、`frontend/`、`tests/test_api.py`，前端只通过 HTTP 调用后端，后端复用现有 core/storage 管理器。
 - 验证方式：运行 `uv run pytest`、`uv run python -m compileall src scripts tests backend frontend`，手动启动后端和前端验证页面。
 - 是否完成：已完成。
+## Step 15：多环境配置
+
+- 目标：支持 development / testing / production 三种环境配置。
+- 修改内容：新增 `config/envs/*.yaml`，增强 `ConfigManager`，补充配置检查和单元测试。
+- 验证方式：运行 `uv run pytest`、`uv run python scripts/check_project_config.py`、`uv run python -m compileall src scripts tests backend frontend`。
+- 是否完成：已完成。

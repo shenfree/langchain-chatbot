@@ -1,4 +1,4 @@
-﻿# LangChain Chat 全局配置文件
+# LangChain Chat 全局配置文件
 # 说明：本文件只保存非敏感配置。API Key、MySQL 密码等敏感信息请写入 .env。
 
 # 应用基础信息，用于 README、日志和后续扩展展示。
@@ -6,6 +6,7 @@ app:
   name: langchain-chat
   version: 0.1.0
   env: development
+  debug: true
 
 # 模型配置。
 # env_key 表示该模型读取哪个 .env 环境变量作为 API Key，严禁把真实 Key 写在这里。

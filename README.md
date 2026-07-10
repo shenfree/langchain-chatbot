@@ -272,6 +272,29 @@ data/file_storage/
 
 更多配置说明见 [docs/configuration.md](docs/configuration.md)。
 
+
+## 多环境配置
+
+项目支持通过 `APP_ENV` 切换运行环境：
+
+- `development`：开发环境，默认 SQLite 路径为 `data/sqlite/app_dev.db`，日志等级建议为 `DEBUG`
+- `testing`：测试环境，默认 SQLite 路径为 `data/sqlite/app_test.db`，适合运行测试
+- `production`：生产环境，默认 SQLite 路径为 `data/sqlite/app.db`，日志等级建议为 `INFO`
+
+PowerShell 示例：
+
+```powershell
+$env:APP_ENV="development"
+uv run python src/main.py
+
+$env:APP_ENV="testing"
+uv run pytest
+
+Remove-Item Env:APP_ENV
+```
+
+不设置 `APP_ENV` 时，项目仍然只读取 `config.yaml`，保持兼容。
+
 ## 日志说明
 
 日志配置文件：

@@ -1,4 +1,4 @@
-﻿# 配置说明
+# 配置说明
 
 本文档说明 `langchain-chat` 项目的配置文件、环境变量、存储切换、模型切换和日志位置。
 
@@ -217,3 +217,33 @@ uv run python scripts/test_logging.py
 ```
 
 如果仍未生成，检查 `logging.yaml` 是否存在，以及项目根目录下是否有 `logs/` 目录。
+
+## 多环境配置
+
+项目支持通过环境变量 `APP_ENV` 选择运行环境。可选值：
+
+- `development`：开发环境，`app.debug=true`，SQLite 路径为 `data/sqlite/app_dev.db`。
+- `testing`：测试环境，`app.debug=true`，SQLite 路径为 `data/sqlite/app_test.db`。
+- `production`：生产环境，`app.debug=false`，SQLite 路径为 `data/sqlite/app.db`。
+
+配置加载顺序：
+
+1. 先读取 `config.yaml`。
+2. 如果设置了 `APP_ENV`，再读取 `config/envs/{APP_ENV}.yaml`。
+3. 环境配置递归覆盖基础配置。
+
+递归覆盖会保留基础配置里的 `models.available`、`storage.mysql`、`storage.file` 等配置块。
+
+PowerShell 示例：
+
+```powershell
+$env:APP_ENV="development"
+uv run python src/main.py
+
+$env:APP_ENV="testing"
+uv run pytest
+
+Remove-Item Env:APP_ENV
+```
+
+如果 `APP_ENV` 写成未知值，例如 `unknown`，程序会抛出清晰错误。

@@ -58,3 +58,12 @@ git tag step-16-fastapi-webui
 git push
 git push origin step-16-fastapi-webui
 ```
+## Step 15 多环境配置示例
+
+```powershell
+git add .
+git commit -m "step 15: add multi environment config"
+git tag step-15-envs
+git push
+git push origin step-15-envs
+```

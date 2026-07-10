@@ -6,6 +6,7 @@
 本脚本只检查配置文件和目录是否齐全，不连接真实模型，也不连接 MySQL。
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.core.config_manager import ConfigManager
+
 VALID_STORAGE_TYPES = {"sqlite", "mysql", "file"}
+VALID_APP_ENVS = {"development", "testing", "production"}
 
 
 def main() -> None:
@@ -27,6 +31,11 @@ def main() -> None:
     logs_dir = PROJECT_ROOT / "logs"
     configuration_doc = PROJECT_ROOT / "docs" / "configuration.md"
     readme_path = PROJECT_ROOT / "README.md"
+    env_paths = {
+        "development": PROJECT_ROOT / "config" / "envs" / "development.yaml",
+        "testing": PROJECT_ROOT / "config" / "envs" / "testing.yaml",
+        "production": PROJECT_ROOT / "config" / "envs" / "production.yaml",
+    }
 
     _require_file(config_path, "config.yaml")
     _require_file(env_example_path, ".env.example")
@@ -34,8 +43,14 @@ def main() -> None:
     _require_dir(logs_dir, "logs")
     _require_file(configuration_doc, "docs/configuration.md")
     _require_file(readme_path, "README.md")
+    for label, path in env_paths.items():
+        _require_file(path, f"config/envs/{label}.yaml")
 
-    config = _load_yaml(config_path)
+    app_env = os.getenv("APP_ENV")
+    if app_env and app_env not in VALID_APP_ENVS:
+        raise RuntimeError("APP_ENV 必须是 development / testing / production 之一。")
+
+    config = ConfigManager(project_root=PROJECT_ROOT).get_config()
     storage = config.get("storage")
     if not isinstance(storage, dict):
         raise RuntimeError("config.yaml 缺少 storage 配置块。")
@@ -46,11 +61,18 @@ def main() -> None:
 
     for section in ("sqlite", "mysql", "file"):
         if section not in storage:
-            raise RuntimeError(f"config.yaml 缺少 storage.{section} 配置块。")
+            raise RuntimeError(f"环境覆盖后缺少 storage.{section} 配置块。")
 
     models = config.get("models")
     if not isinstance(models, dict) or not models.get("available"):
-        raise RuntimeError("config.yaml 缺少 models.available 模型配置。")
+        raise RuntimeError("环境覆盖后缺少 models.available 模型配置。")
+
+    app_config = config.get("app", {}) if isinstance(config.get("app"), dict) else {}
+    sqlite_path = storage.get("sqlite", {}).get("path", "")
+
+    print(f"当前加载环境：{app_config.get('env', '未设置')}")
+    print(f"当前 storage.type：{storage_type}")
+    print(f"当前 SQLite 路径：{sqlite_path}")
 
     if storage_type == "mysql":
         print("提示：当前 storage.type=mysql，请确认 .env 中已填写 MYSQL_PASSWORD。")

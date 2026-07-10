@@ -1,0 +1,15 @@
+﻿app:
+  name: langchain-chat
+  env: testing
+  debug: true
+
+storage:
+  type: sqlite
+  sqlite:
+    path: data/sqlite/app_test.db
+
+logging:
+  level: DEBUG
+
+models:
+  default: deepseek-chat
