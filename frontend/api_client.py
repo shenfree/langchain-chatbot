@@ -3,6 +3,7 @@
 本模块只通过 requests 调用 FastAPI 后端，不直接访问后端内部业务模块。
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 import requests
@@ -79,6 +80,37 @@ class ApiClient:
                 "model_name": model_name,
             },
         )
+
+    def stream_chat(
+        self,
+        session_id: int,
+        message: str,
+        preset_id: int | None = None,
+        model_name: str | None = None,
+    ) -> Iterator[str]:
+        """调用后端流式聊天接口，逐段返回文本。"""
+        response = requests.post(
+            f"{self.base_url}/chat/stream",
+            json={
+                "session_id": session_id,
+                "message": message,
+                "preset_id": preset_id,
+                "model_name": model_name,
+            },
+            timeout=120,
+            stream=True,
+        )
+        if response.status_code >= 400:
+            detail = response.text
+            try:
+                detail = response.json().get("detail", detail)
+            except ValueError:
+                pass
+            raise RuntimeError(str(detail))
+
+        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+            if chunk:
+                yield chunk
 
     def search(self, keyword: str) -> list[dict[str, Any]]:
         return self._request("GET", "/search", params={"keyword": keyword}).get("results", [])

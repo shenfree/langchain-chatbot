@@ -10,6 +10,8 @@ from api_client import ApiClient
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_SESSION_TITLES = {"", "新会话", "Web 新会话", "未命名会话"}
+AUTO_TITLE_MAX_LENGTH = 20
 
 st.set_page_config(page_title="LangChain Chat WebUI", page_icon="💬", layout="wide")
 
@@ -122,6 +124,12 @@ def render_secondary_controls(
         else:
             render_preset_and_model_controls(client)
 
+    with st.sidebar.expander("会话操作", expanded=False):
+        if current_user is None:
+            st.caption("选择演示用户和会话后可管理会话。")
+        else:
+            render_session_action_controls(client)
+
     with st.sidebar.expander("导出", expanded=False):
         if current_user is None:
             st.caption("选择演示用户和会话后可导出。")
@@ -146,6 +154,38 @@ def small_hint(text: str) -> None:
         f"<div style='font-size: 12px; color: #8b8b8b; line-height: 1.45; margin: -0.35rem 0 0.45rem 0;'>{text}</div>",
         unsafe_allow_html=True,
     )
+
+
+def render_session_action_controls(client: ApiClient) -> None:
+    """当前会话的低频管理操作。"""
+    message = st.session_state.pop("session_action_message", None)
+    if message:
+        st.success(message)
+
+    session_id = st.session_state.get("current_session_id")
+    if session_id is None:
+        st.caption("当前没有可操作的会话。")
+        return
+
+    detail = safe_call(lambda: client.get_session(int(session_id)), None)
+    if not detail:
+        st.caption("当前会话不存在，请刷新后重试。")
+        return
+
+    session = detail["session"]
+    title = session.get("title") or "新会话"
+    st.caption(f"当前会话：{title}")
+    small_hint("删除当前会话会同时删除该会话的聊天记录，请谨慎操作。")
+
+    confirm_key = f"confirm_delete_session_{session_id}"
+    confirmed = st.checkbox("我确认删除当前会话及其聊天记录", key=confirm_key)
+    if st.button("删除当前会话", disabled=not confirmed, use_container_width=True):
+        result = safe_action(lambda: client.delete_session(int(session_id)), "会话已删除")
+        if result is not None:
+            st.session_state.pop("current_session_id", None)
+            st.session_state.pop(confirm_key, None)
+            st.session_state["session_action_message"] = "会话已删除"
+            st.rerun()
 
 
 def render_user_controls(client: ApiClient) -> None:
@@ -336,22 +376,65 @@ def render_chat_area(client: ApiClient, session_id: int) -> None:
 
     user_input = st.chat_input("输入消息，按发送开始对话")
     if user_input:
+        maybe_auto_rename_session(
+            client=client,
+            session_id=session_id,
+            current_title=session.get("title"),
+            user_input=user_input,
+            is_first_message=not messages,
+        )
         with st.chat_message("user"):
             st.write(user_input)
         with st.chat_message("assistant"):
-            with st.spinner("AI 正在回复..."):
-                response = safe_action(
-                    lambda: client.chat(
-                        session_id=session_id,
-                        message=user_input,
-                        preset_id=st.session_state.get("selected_preset_id"),
-                        model_name=st.session_state.get("selected_model"),
-                    ),
-                    "回复完成",
-                )
-                if response:
-                    st.write(response.get("reply", ""))
+            placeholder = st.empty()
+            answer = ""
+            try:
+                for chunk in client.stream_chat(
+                    session_id=session_id,
+                    message=user_input,
+                    preset_id=st.session_state.get("selected_preset_id"),
+                    model_name=st.session_state.get("selected_model"),
+                ):
+                    answer += chunk
+                    placeholder.markdown(answer)
+            except Exception as exc:
+                placeholder.error(f"流式接口调用失败：{exc}")
+                return
         st.rerun()
+
+
+def maybe_auto_rename_session(
+    client: ApiClient,
+    session_id: int,
+    current_title: str | None,
+    user_input: str,
+    is_first_message: bool,
+) -> None:
+    """在默认标题会话的首轮提问后，使用用户第一条消息自动生成标题。"""
+    if not is_first_message or not is_default_session_title(current_title):
+        return
+
+    new_title = build_session_title(user_input)
+    if not new_title:
+        return
+
+    try:
+        client.rename_session(session_id, new_title)
+    except Exception as exc:
+        st.caption(f"会话标题自动生成失败：{exc}")
+
+
+def is_default_session_title(title: str | None) -> bool:
+    """判断当前标题是否仍是系统默认标题。"""
+    return (title or "").strip() in DEFAULT_SESSION_TITLES
+
+
+def build_session_title(user_input: str) -> str:
+    """根据用户首条消息生成简短标题。"""
+    normalized = " ".join((user_input or "").strip().split())
+    if len(normalized) <= AUTO_TITLE_MAX_LENGTH:
+        return normalized
+    return f"{normalized[:AUTO_TITLE_MAX_LENGTH]}..."
 
 
 def load_current_user(client: ApiClient) -> dict[str, Any] | None:
