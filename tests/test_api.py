@@ -1,10 +1,24 @@
-﻿"""FastAPI 后端接口测试。"""
+"""FastAPI 后端接口测试。"""
 
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+class FakeChatEngine:
+    """用于 API 测试的假 ChatEngine，避免调用真实大模型。"""
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def stream_chat(self, *args, **kwargs):
+        yield "流式"
+        yield "回复"
+
+    async def chat_once(self, *args, **kwargs) -> str:
+        return "完整回复"
 
 
 def _write_test_project(tmp_path: Path) -> Path:
@@ -101,3 +115,47 @@ def test_health_users_presets_models_and_session_api(tmp_path: Path, monkeypatch
         assert detail.status_code == 200
         assert detail.json()["session"]["title"] == "API 测试会话"
         assert detail.json()["messages"] == []
+
+
+def test_chat_stream_route_validation(tmp_path: Path, monkeypatch) -> None:
+    """缺少必要参数时，/chat/stream 应返回请求校验错误。"""
+    project_root = _write_test_project(tmp_path)
+    monkeypatch.setenv("LANGCHAIN_CHAT_PROJECT_ROOT", str(project_root))
+    monkeypatch.setenv("TEST_API_KEY", "fake-key")
+    monkeypatch.delenv("MODEL_NAME", raising=False)
+
+    with TestClient(app) as client:
+        response = client.post("/chat/stream", json={})
+        assert response.status_code == 422
+
+
+def test_chat_stream_route_returns_stream_content(tmp_path: Path, monkeypatch) -> None:
+    """mock ChatEngine 后，/chat/stream 应返回流式内容并保存消息。"""
+    project_root = _write_test_project(tmp_path)
+    monkeypatch.setenv("LANGCHAIN_CHAT_PROJECT_ROOT", str(project_root))
+    monkeypatch.setenv("TEST_API_KEY", "fake-key")
+    monkeypatch.delenv("MODEL_NAME", raising=False)
+    monkeypatch.setattr("backend.routers.chat.ChatEngine", FakeChatEngine)
+
+    with TestClient(app) as client:
+        created_user = client.post("/users", json={"username": "stream_user"})
+        assert created_user.status_code == 200
+        switched = client.post("/users/current", json={"username": "stream_user"})
+        assert switched.status_code == 200
+        session = client.post("/sessions", json={"title": "流式测试会话", "model_name": "fake-model"})
+        assert session.status_code == 200
+
+        with client.stream(
+            "POST",
+            "/chat/stream",
+            json={"session_id": session.json()["id"], "message": "请流式回答"},
+        ) as response:
+            assert response.status_code == 200
+            body = "".join(response.iter_text())
+
+        assert body == "流式回复"
+        detail = client.get(f"/sessions/{session.json()['id']}")
+        assert detail.status_code == 200
+        messages = detail.json()["messages"]
+        assert [message["role"] for message in messages] == ["human", "ai"]
+        assert messages[-1]["content"] == "流式回复"
