@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "langchain-chat"
 version = "0.1.0"
 description = "LangChain 多轮会话系统课程实训项目"
