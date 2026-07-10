@@ -1,10 +1,14 @@
 ﻿# LangChain Chat 全局配置文件
+# 说明：本文件只保存非敏感配置。API Key、MySQL 密码等敏感信息请写入 .env。
 
+# 应用基础信息，用于 README、日志和后续扩展展示。
 app:
   name: langchain-chat
   version: 0.1.0
   env: development
 
+# 模型配置。
+# env_key 表示该模型读取哪个 .env 环境变量作为 API Key，严禁把真实 Key 写在这里。
 models:
   default: deepseek-chat
   available:
@@ -19,15 +23,20 @@ models:
       base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
       env_key: QWEN_API_KEY
 
+# 旧版兼容配置：保留给早期代码或课程文档说明使用。
 model:
   default_provider: openai
   default_model: gpt-4o-mini
 
+# LLM 调用参数。
 llm:
   timeout: 60
   max_retries: 3
   temperature: 0.7
 
+# 存储后端配置。
+# type 可选：sqlite / mysql / file。
+# 默认使用 sqlite，便于本地直接运行。
 storage:
   type: sqlite
   sqlite:
@@ -41,6 +50,17 @@ storage:
   file:
     base_dir: data/file_storage
 
+# Markdown 导出配置。
+# 当前导出功能默认使用 data/users/{username}/exports，本配置用于统一说明和后续扩展。
+export:
+  markdown_dir_template: data/users/{username}/exports
+
+# 日志配置文件位置。实际日志规则见 logging.yaml。
+logging:
+  config_path: logging.yaml
+  app_log: logs/app.log
+  error_log: logs/error.log
+
+# TUI 命令行界面配置。
 tui:
   theme: default
-
