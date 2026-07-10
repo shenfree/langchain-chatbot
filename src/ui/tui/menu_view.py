@@ -10,6 +10,7 @@ MENU_OPTIONS = {
     "4": "开始对话",
     "5": "设置",
     "6": "对话搜索",
+    "7": "导出会话",
     "0": "退出程序",
 }
 
@@ -39,39 +40,43 @@ PRESET_MENU_OPTIONS = {
     "0": "返回主菜单",
 }
 
+SETTING_MENU_OPTIONS = {
+    "1": "查看当前模型",
+    "2": "查看可用模型",
+    "3": "切换默认模型",
+    "0": "返回主菜单",
+}
+
+
+def _render_menu(title: str, options: dict[str, str]) -> None:
+    """通用菜单渲染函数。"""
+    print_blank_line()
+    print_title(title)
+    for key, label in options.items():
+        console.print(f"[bold]{key}.[/bold] {label}")
+    print_blank_line()
+
 
 def render_main_menu() -> None:
     """渲染主菜单。"""
-    print_blank_line()
-    print_title("LangChain Chat")
-    for key, label in MENU_OPTIONS.items():
-        console.print(f"[bold]{key}.[/bold] {label}")
-    print_blank_line()
+    _render_menu("LangChain Chat", MENU_OPTIONS)
 
 
 def render_user_menu() -> None:
     """渲染用户管理子菜单。"""
-    print_blank_line()
-    print_title("用户管理")
-    for key, label in USER_MENU_OPTIONS.items():
-        console.print(f"[bold]{key}.[/bold] {label}")
-    print_blank_line()
+    _render_menu("用户管理", USER_MENU_OPTIONS)
 
 
 def render_session_menu() -> None:
     """渲染会话管理子菜单。"""
-    print_blank_line()
-    print_title("会话管理")
-    for key, label in SESSION_MENU_OPTIONS.items():
-        console.print(f"[bold]{key}.[/bold] {label}")
-    print_blank_line()
+    _render_menu("会话管理", SESSION_MENU_OPTIONS)
 
 
 def render_preset_menu() -> None:
     """渲染预设管理子菜单。"""
-    print_blank_line()
-    print_title("预设管理")
-    for key, label in PRESET_MENU_OPTIONS.items():
-        console.print(f"[bold]{key}.[/bold] {label}")
-    print_blank_line()
+    _render_menu("预设管理", PRESET_MENU_OPTIONS)
 
+
+def render_setting_menu() -> None:
+    """渲染设置菜单。"""
+    _render_menu("设置", SETTING_MENU_OPTIONS)

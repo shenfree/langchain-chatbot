@@ -11,6 +11,7 @@ from prompt_toolkit import PromptSession
 
 from src.core.chat_engine import ChatEngine
 from src.core.config_manager import ConfigManager
+from src.core.model_manager import ModelManager
 from src.core.preset_manager import PresetManager
 from src.core.session_manager import SessionManager
 from src.core.user_manager import UserManager
@@ -31,10 +32,12 @@ from src.ui.tui.menu_view import (
     MENU_OPTIONS,
     PRESET_MENU_OPTIONS,
     SESSION_MENU_OPTIONS,
+    SETTING_MENU_OPTIONS,
     USER_MENU_OPTIONS,
     render_main_menu,
     render_preset_menu,
     render_session_menu,
+    render_setting_menu,
     render_user_menu,
 )
 from src.ui.tui.widgets import console, print_error, print_info, print_warning
@@ -53,6 +56,7 @@ class TUIApp(AbstractUI):
         self.user_manager: UserManager | None = None
         self.preset_manager: PresetManager | None = None
         self.session_manager: SessionManager | None = None
+        self.model_manager: ModelManager | None = None
         self.chat_engine: ChatEngine | None = None
 
     async def run(self) -> None:
@@ -78,6 +82,7 @@ class TUIApp(AbstractUI):
         self.user_manager = UserManager(self.storage)
         self.preset_manager = PresetManager(self.storage, project_root=self.project_root)
         self.session_manager = SessionManager(self.storage)
+        self.model_manager = ModelManager(self.config_manager)
         await self.preset_manager.load_builtin_presets()
 
     async def _close_services(self) -> None:
@@ -117,9 +122,11 @@ class TUIApp(AbstractUI):
         elif choice == "4":
             await self.start_chat_flow()
         elif choice == "5":
-            await self.show_stub("设置")
+            await self.show_setting_menu()
         elif choice == "6":
             await self.search_messages_flow()
+        elif choice == "7":
+            await self.export_session_flow()
         else:
             valid_options = "、".join(MENU_OPTIONS.keys())
             print_error(f"无效输入：{choice or '空输入'}。请输入以下编号之一：{valid_options}")
@@ -345,6 +352,13 @@ class TUIApp(AbstractUI):
                 result["exit_chat"] = True
         elif command == "/search":
             await self.search_messages_flow()
+        elif command == "/switch":
+            switched = await self.switch_chat_model_flow(current_session)
+            if switched is not None:
+                result["new_session"] = switched["session"]
+                result["new_engine"] = switched["engine"]
+        elif command == "/export":
+            await self.export_current_session(current_user, current_session)
         elif command == "/load":
             loaded_session = await self.prompt_session_from_current_user(current_user)
             if loaded_session is not None:
@@ -522,9 +536,10 @@ class TUIApp(AbstractUI):
         if self.chat_engine is not None and (model_name is None or self.chat_engine.model_name == model_name):
             return self.chat_engine
         try:
+            active_model = model_name or self._require_model_manager().get_current_model()
             self.chat_engine = ChatEngine(
                 config_manager=self._require_config_manager(),
-                model_name=model_name,
+                model_name=active_model,
             )
             return self.chat_engine
         except ValueError as exc:
@@ -691,6 +706,115 @@ class TUIApp(AbstractUI):
             print_error("preset_id 必须是数字。")
             return None
 
+    async def show_setting_menu(self) -> None:
+        """显示并处理设置菜单。"""
+        while self.is_running:
+            render_setting_menu()
+            choice = (await self._prompt_text("请选择设置功能编号：")).strip()
+            if choice == "0":
+                return
+            if choice == "1":
+                print_info(f"当前默认模型：{self._require_model_manager().get_current_model()}")
+            elif choice == "2":
+                self.render_available_models()
+            elif choice == "3":
+                model_config = await self.prompt_model_choice()
+                if model_config is not None:
+                    switched = self._require_model_manager().switch_model(str(model_config["value"]))
+                    # 默认模型变化后清空 ChatEngine 缓存，后续新会话会使用新模型。
+                    self.chat_engine = None
+                    print_info(f"默认模型已切换为：{switched['value']}")
+            else:
+                valid_options = "、".join(SETTING_MENU_OPTIONS.keys())
+                print_error(f"无效输入：{choice or '空输入'}。请输入以下编号之一：{valid_options}")
+
+    def render_available_models(self) -> None:
+        """展示 config.yaml 中配置的可用模型。"""
+        models = self._require_model_manager().list_models()
+        if not models:
+            print_warning("暂无可用模型配置。")
+            return
+        console.print("[bold]可用模型：[/bold]")
+        for index, model in enumerate(models, start=1):
+            console.print(
+                f"{index}. {model.get('name')} | {model.get('value')} | "
+                f"provider={model.get('provider')} | env_key={model.get('env_key')}"
+            )
+
+    async def prompt_model_choice(self) -> dict | None:
+        """提示用户按编号或模型名称选择模型。"""
+        models = self._require_model_manager().list_models()
+        if not models:
+            print_warning("暂无可用模型配置。")
+            return None
+        self.render_available_models()
+        raw_value = (await self._prompt_text("请输入模型编号或模型名称：")).strip()
+        if not raw_value:
+            print_warning("未输入模型。")
+            return None
+        if raw_value.isdigit():
+            index = int(raw_value)
+            if 1 <= index <= len(models):
+                return models[index - 1]
+            print_error("模型编号超出范围。")
+            return None
+        try:
+            return self._require_model_manager().get_model_config(raw_value)
+        except ValueError as exc:
+            print_error(str(exc))
+            return None
+
+    async def switch_chat_model_flow(self, current_session: Session) -> dict | None:
+        """切换当前会话使用的模型。"""
+        model_config = await self.prompt_model_choice()
+        if model_config is None or current_session.id is None:
+            return None
+        model_name = str(model_config["value"])
+        try:
+            engine = ChatEngine(config_manager=self._require_config_manager(), model_name=model_name)
+            updated_session = await self._require_session_manager().update_session_model(
+                current_session.id,
+                model_name,
+            )
+            self.chat_engine = engine
+            print_info(f"当前会话模型已切换为：{model_name}")
+            return {"session": updated_session, "engine": engine}
+        except ValueError as exc:
+            print_error(str(exc))
+            return None
+
+    async def export_session_flow(self) -> None:
+        """主菜单导出指定会话。"""
+        current_user = self._require_current_user()
+        if current_user is None:
+            return
+        session = await self.prompt_session_from_current_user(current_user)
+        if session is None:
+            return
+        await self.export_current_session(current_user, session)
+
+    async def export_current_session(self, current_user: User, session: Session) -> None:
+        """导出当前会话为 Markdown 文件。"""
+        if not self._session_belongs_to_user(session, current_user):
+            print_error("该会话不属于当前用户。")
+            return
+        if session.id is None:
+            print_error("当前会话 ID 为空，无法导出。")
+            return
+        try:
+            path = await self._require_session_manager().export_session_to_markdown(
+                session.id,
+                current_user.username,
+            )
+            print_info(f"会话已导出：{path}")
+        except ValueError as exc:
+            print_error(str(exc))
+
+    def _require_model_manager(self) -> ModelManager:
+        """获取模型管理器。"""
+        if self.model_manager is None:
+            raise RuntimeError("模型管理器尚未初始化。")
+        return self.model_manager
     async def show_stub(self, feature_name: str) -> None:
         """显示功能占位提示。"""
         print_warning(f"{feature_name} 功能将在后续步骤实现。")
@@ -699,5 +823,7 @@ class TUIApp(AbstractUI):
         """退出 TUI 应用。"""
         self.is_running = False
         print_info("程序已退出。")
+
+
 
 

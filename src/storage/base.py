@@ -66,6 +66,10 @@ class StorageBackend(ABC):
         """删除指定会话。"""
 
     @abstractmethod
+    async def update_session_model(self, session_id: int, model_name: str) -> Session | None:
+        """更新会话使用的模型名。"""
+
+    @abstractmethod
     async def add_message(
         self,
         session_id: int,
@@ -116,4 +120,5 @@ class StorageBackend(ABC):
     @abstractmethod
     async def delete_preset(self, preset_id: int) -> None:
         """删除非内置预设。"""
+
 

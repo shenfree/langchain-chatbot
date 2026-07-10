@@ -1,7 +1,7 @@
 ﻿"""TUI 聊天视图。
 
 本模块只负责聊天界面的展示，不负责业务规则。
-真正的会话创建、消息保存、加载、重命名、删除、搜索和模型调用分别由
+真正的会话创建、消息保存、加载、重命名、删除、搜索、导出和模型调用分别由
 SessionManager 与 ChatEngine 完成。
 """
 
@@ -23,6 +23,8 @@ def render_chat_help() -> None:
     console.print("/delete   删除当前会话并返回主菜单")
     console.print("/load     加载历史会话继续对话")
     console.print("/search   搜索当前用户历史消息")
+    console.print("/switch   切换当前会话模型")
+    console.print("/export   导出当前会话为 Markdown")
 
 
 def render_chat_header(username: str, model_name: str, preset: Preset | None) -> None:
@@ -78,10 +80,7 @@ def render_loaded_session(session: Session, preset: Preset | None) -> None:
 
 
 def render_search_results(results: list[dict]) -> None:
-    """使用 rich Table 展示搜索结果。
-
-    命中内容较长时只显示前 80 个字符，并把换行替换为空格，避免表格显示混乱。
-    """
+    """使用 rich Table 展示搜索结果。"""
     if not results:
         print_warning("未找到匹配的历史消息。")
         return

@@ -202,6 +202,19 @@ class SQLiteBackend(StorageBackend):
             await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             await db.commit()
 
+    async def update_session_model(self, session_id: int, model_name: str) -> Session | None:
+        """更新会话使用的模型名。"""
+        now = self._now()
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE sessions SET model_name = ?, updated_at = ? WHERE id = ?",
+                (model_name, now, session_id),
+            )
+            await db.commit()
+            cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+            row = await cursor.fetchone()
+            return self._row_to_session(row) if row else None
+
     async def add_message(
         self,
         session_id: int,
@@ -432,5 +445,6 @@ class SQLiteBackend(StorageBackend):
         data = cls._row_to_dict(row)
         data["is_builtin"] = bool(data["is_builtin"])
         return Preset(**data)
+
 
 
