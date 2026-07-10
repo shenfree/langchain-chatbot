@@ -38,6 +38,9 @@ storage:
     user: root
     database: langchain_chat
     charset: utf8mb4
+  file:
+    base_dir: data/file_storage
 
 tui:
   theme: default
+

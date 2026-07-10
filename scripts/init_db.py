@@ -1,4 +1,4 @@
-﻿"""数据库初始化脚本。
+﻿"""数据库/文件存储初始化脚本。
 
 运行方式：
     uv run python scripts/init_db.py
@@ -41,6 +41,11 @@ async def main() -> None:
     if storage_type == "mysql":
         database = storage_config.get("mysql", {}).get("database", "langchain_chat")
         print(f"MySQL 数据库初始化完成：{database}")
+        return
+
+    if storage_type == "file":
+        base_dir = storage_config.get("file", {}).get("base_dir", "data/file_storage")
+        print(f"File 存储初始化完成：{base_dir}")
         return
 
     print(f"{storage_type} 存储初始化完成")

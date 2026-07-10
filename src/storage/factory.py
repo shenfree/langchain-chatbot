@@ -1,7 +1,7 @@
 ﻿"""存储后端工厂。
 
 工厂负责根据 config.yaml 中的 storage.type 创建具体存储实现。
-Step 11 开始支持 SQLite 与 MySQL 两种后端切换。
+Step 12 开始支持 SQLite / MySQL / File 三种后端切换。
 """
 
 import os
@@ -11,6 +11,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from src.storage.base import StorageBackend
+from src.storage.file_backend import FileBackend
 from src.storage.mysql_backend import MySQLBackend
 from src.storage.sqlite_backend import SQLiteBackend
 
@@ -37,7 +38,7 @@ class StorageFactory:
             return StorageFactory._create_mysql(storage_config, root)
 
         if storage_type == "file":
-            raise NotImplementedError("file 存储后端将在后续步骤实现。")
+            return StorageFactory._create_file(storage_config, root)
 
         raise ValueError(f"不支持的存储类型：{storage_type}")
 
@@ -81,3 +82,15 @@ class StorageFactory:
             database=database,
             charset=charset,
         )
+
+    @staticmethod
+    def _create_file(storage_config: dict[str, Any], project_root: Path) -> StorageBackend:
+        """创建 JSON 文件存储后端。"""
+        file_config = storage_config.get("file", {})
+        base_dir = Path(file_config.get("base_dir", "data/file_storage"))
+
+        # 与 SQLite 一样，相对路径统一按项目根目录解析，避免运行目录不同导致数据分散。
+        if not base_dir.is_absolute():
+            base_dir = project_root / base_dir
+
+        return FileBackend(base_dir)
