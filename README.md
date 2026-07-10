@@ -1,17 +1,19 @@
-﻿# LangChain Chat
+# LangChain Chat
 
 项目名：`langchain-chat`  
 GitHub 仓库名：`langchain-chatbot`
 
 `langchain-chat` 是一个课程实训项目，目标是从零实现一个支持多用户、多会话、多角色 Prompt 和多模型切换的 LangChain 命令行多轮会话系统。
 
-项目当前以 TUI 命令行交互为主，支持 SQLite / MySQL / JSON File 三种存储后端切换，并提供结构化日志和 Markdown 导出能力。
+项目当前保留 TUI 命令行交互，并新增 FastAPI + Streamlit 前后端分离 WebUI 扩展。WebUI 是展示与操作入口之一，不替代 TUI。项目支持 SQLite / MySQL / JSON File 三种存储后端切换，并提供结构化日志和 Markdown 导出能力。
 
 ## 技术栈
 
 - Python 3.10+
 - uv 环境和依赖管理
 - LangChain / langchain-openai
+- FastAPI 后端接口
+- Streamlit 前端页面
 - rich + prompt_toolkit 命令行 TUI
 - Pydantic 数据模型
 - SQLite + aiosqlite
@@ -32,6 +34,7 @@ GitHub 仓库名：`langchain-chatbot`
 - SQLite / MySQL / File 三种存储后端切换
 - 结构化日志：控制台、`logs/app.log`、`logs/error.log`
 - 配置检查脚本：检查项目关键配置文件是否完整
+- 前后端分离 WebUI：FastAPI 提供接口，Streamlit 通过 HTTP 调用后端
 
 ## 项目目录结构
 
@@ -46,6 +49,12 @@ langchain-chat/
     workflow_log.md
   logs/
     .gitkeep
+  backend/
+    main.py
+    routers/
+  frontend/
+    app.py
+    api_client.py
   scripts/
     init_db.py
     check_project_config.py
@@ -158,6 +167,36 @@ uv run python src\main.py
 
 启动后会进入 TUI 主菜单，可进行用户管理、会话管理、预设管理、开始对话、设置、搜索和导出。
 
+## 启动前后端分离 WebUI
+
+WebUI 是扩展功能，不替代已有 TUI。需要分别启动 FastAPI 后端和 Streamlit 前端。
+
+终端 1 启动后端：
+
+```powershell
+uv run uvicorn backend.main:app --reload
+```
+
+终端 2 启动前端：
+
+```powershell
+uv run streamlit run frontend/app.py
+```
+
+浏览器打开：
+
+```text
+http://localhost:8501
+```
+
+FastAPI 文档地址：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+当前 WebUI 支持：用户创建与切换、会话列表与新建、历史会话查看、预设选择、模型选择、普通聊天、历史搜索和 Markdown 导出。MVP 阶段聊天接口返回完整回复，后续可扩展为 SSE 流式接口。
+
 ## 运行测试脚本
 
 配置检查：
@@ -269,7 +308,6 @@ git push origin step-14-config-docs
 
 以下能力尚未实现，仅作为后续扩展方向：
 
-- WebUI
 - RAG 知识库问答
 - 文件上传和图文输入
 - 语音输入输出

@@ -1,4 +1,4 @@
-﻿# 项目实施记录
+# 项目实施记录
 
 本文档按 Step 记录 `langchain-chat` 的课程实训演进过程，便于答辩时说明项目是逐步完成的。
 
@@ -98,4 +98,11 @@
 - 目标：整理配置文件，补充 README 和 docs 文档，提供配置检查脚本。
 - 修改内容：整理 `config.yaml`、`.env.example`、`README.md`，新增 `docs/configuration.md`、`docs/workflow_log.md`、`docs/git_flow.md`、`scripts/check_project_config.py`。
 - 验证方式：运行 `uv run python scripts/check_project_config.py`。
+- 是否完成：已完成。
+
+## 扩展：FastAPI + Streamlit 前后端分离 WebUI
+
+- 目标：在保留 TUI 的基础上新增 FastAPI 后端接口和 Streamlit 前端页面。
+- 修改内容：新增 `backend/`、`frontend/`、`tests/test_api.py`，前端只通过 HTTP 调用后端，后端复用现有 core/storage 管理器。
+- 验证方式：运行 `uv run pytest`、`uv run python -m compileall src scripts tests backend frontend`，手动启动后端和前端验证页面。
 - 是否完成：已完成。

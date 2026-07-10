@@ -1,4 +1,4 @@
-﻿# Git 提交流程说明
+# Git 提交流程说明
 
 本项目按课程实施步骤逐步开发。每完成一个 Step 后，建议立即提交并打 tag，方便答辩时展示项目演进过程。
 
@@ -48,3 +48,13 @@ git tag
 - `logs/*.log` 是运行日志，不要提交。
 - `data/` 是运行数据，不要提交。
 - 如果误生成了缓存目录，可以删除 `__pycache__` 后再提交。
+
+## 前后端分离 WebUI 扩展示例
+
+```powershell
+git add .
+git commit -m "feat: add fastapi streamlit webui"
+git tag step-16-fastapi-webui
+git push
+git push origin step-16-fastapi-webui
+```
