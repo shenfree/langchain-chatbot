@@ -1,7 +1,7 @@
 ﻿"""会话管理业务逻辑。
 
-本模块负责会话创建、消息保存、历史消息组装、搜索、模型名更新，以及 Step 10 的
-Markdown 导出。TUI 不直接操作 sessions/messages 表，只通过 SessionManager 调用存储层。
+本模块负责会话创建、消息保存、历史消息组装、搜索、模型名更新，以及 Markdown 导出。
+TUI 不直接操作 sessions/messages 表，只通过 SessionManager 调用存储层。
 """
 
 import re
@@ -10,6 +10,9 @@ from pathlib import Path
 
 from src.models.schemas import Message, Session
 from src.storage.base import StorageBackend
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SessionManager:
@@ -27,7 +30,15 @@ class SessionManager:
         preset_id: int | None = None,
     ) -> Session:
         """创建新会话并返回会话对象。"""
-        return await self.storage.create_session(user_id, title, model_name, preset_id)
+        session = await self.storage.create_session(user_id, title, model_name, preset_id)
+        logger.info(
+            "会话创建成功：user_id=%s session_id=%s model_name=%s preset_id=%s",
+            user_id,
+            session.id,
+            model_name,
+            preset_id,
+        )
+        return session
 
     async def list_sessions(self, user_id: int) -> list[Session]:
         """查询当前用户的所有会话。"""
@@ -49,6 +60,7 @@ class SessionManager:
         session = await self.storage.update_session_title(session_id, cleaned_title)
         if session is None:
             raise ValueError(f"会话 ID {session_id} 不存在。")
+        logger.info("会话重命名成功：session_id=%s title_length=%s", session_id, len(cleaned_title))
         return session
 
     async def update_session_model(self, session_id: int, model_name: str) -> Session:
@@ -59,21 +71,25 @@ class SessionManager:
         session = await self.storage.update_session_model(session_id, cleaned_model)
         if session is None:
             raise ValueError(f"会话 ID {session_id} 不存在。")
+        logger.info("会话模型更新成功：session_id=%s model_name=%s", session_id, cleaned_model)
         return session
 
     async def delete_session(self, session_id: int) -> None:
-        """删除会话，消息由数据库外键级联删除。"""
+        """删除会话，消息由存储后端级联删除。"""
         session = await self.storage.get_session(session_id)
         if session is None:
             raise ValueError(f"会话 ID {session_id} 不存在。")
         await self.storage.delete_session(session_id)
+        logger.info("会话删除成功：session_id=%s user_id=%s", session_id, session.user_id)
 
     async def add_user_message(self, session_id: int, content: str) -> Message:
         """保存 human 消息。"""
         cleaned_content = content.strip()
         if not cleaned_content:
             raise ValueError("消息内容不能为空。")
-        return await self.storage.add_message(session_id, "human", cleaned_content)
+        message = await self.storage.add_message(session_id, "human", cleaned_content)
+        logger.debug("用户消息已保存：session_id=%s message_length=%s", session_id, len(cleaned_content))
+        return message
 
     async def add_ai_message(
         self,
@@ -86,20 +102,30 @@ class SessionManager:
         cleaned_content = content.strip()
         if not cleaned_content:
             raise ValueError("AI 回复内容不能为空。")
-        return await self.storage.add_message(
+        message = await self.storage.add_message(
             session_id,
             "ai",
             cleaned_content,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )
+        logger.debug(
+            "AI 消息已保存：session_id=%s message_length=%s prompt_tokens=%s completion_tokens=%s",
+            session_id,
+            len(cleaned_content),
+            prompt_tokens,
+            completion_tokens,
+        )
+        return message
 
     async def search_messages(self, user_id: int, keyword: str) -> list[dict]:
         """搜索当前用户的历史消息。"""
         cleaned_keyword = keyword.strip()
         if not cleaned_keyword:
             raise ValueError("搜索关键词不能为空。")
-        return await self.storage.search_messages(user_id, cleaned_keyword)
+        results = await self.storage.search_messages(user_id, cleaned_keyword)
+        logger.info("历史消息搜索完成：user_id=%s keyword_length=%s result_count=%s", user_id, len(cleaned_keyword), len(results))
+        return results
 
     async def build_history(self, session_id: int) -> list[dict[str, str]]:
         """把数据库消息转换成 ChatEngine 接收的历史格式。"""
@@ -108,6 +134,7 @@ class SessionManager:
         for message in messages:
             if message.role in {"human", "ai", "system"}:
                 history.append({"role": message.role, "content": message.content})
+        logger.debug("会话历史已构建：session_id=%s history_count=%s", session_id, len(history))
         return history
 
     async def auto_title_from_first_message(self, session_id: int, first_message: str) -> Session | None:
@@ -118,7 +145,9 @@ class SessionManager:
         if session.title and session.title != "新会话":
             return session
         title = first_message.strip().replace("\n", " ")[:30] or "新会话"
-        return await self.storage.update_session_title(session_id, title)
+        updated = await self.storage.update_session_title(session_id, title)
+        logger.info("会话标题自动生成：session_id=%s title_length=%s", session_id, len(title))
+        return updated
 
     async def export_session_to_markdown(
         self,
@@ -142,6 +171,7 @@ class SessionManager:
 
         content = self._build_markdown_content(session, username, messages)
         export_path.write_text(content, encoding="utf-8")
+        logger.info("会话导出完成：session_id=%s message_count=%s export_path=%s", session_id, len(messages), export_path)
         return export_path
 
     def _build_markdown_content(self, session: Session, username: str, messages: list[Message]) -> str:

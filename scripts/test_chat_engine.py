@@ -1,10 +1,4 @@
-﻿"""ChatEngine 独立测试脚本。
-
-运行方式：
-    uv run python scripts/test_chat_engine.py
-
-本脚本只用于测试 Step 6 的 ChatEngine，不接入 TUI，不创建会话，也不写聊天记录。
-"""
+﻿"""ChatEngine 独立测试脚本。"""
 
 import asyncio
 import sys
@@ -16,23 +10,35 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.core.chat_engine import ChatEngine
 from src.core.config_manager import ConfigManager
+from src.utils.logger import get_logger, setup_logging
+
+logger = get_logger(__name__)
 
 
 async def main() -> None:
     """创建 ChatEngine，并执行一次流式模型调用。"""
-    config_manager = ConfigManager(project_root=PROJECT_ROOT)
-    engine = ChatEngine(
-        config_manager=config_manager,
-        system_prompt="你是一个简洁的中文助手。",
-    )
+    setup_logging(PROJECT_ROOT / "logging.yaml")
+    logger.info("ChatEngine 测试开始")
 
-    print("用户：请用一句话介绍 LangChain。")
-    print("助手：", end="", flush=True)
+    try:
+        config_manager = ConfigManager(project_root=PROJECT_ROOT)
+        engine = ChatEngine(
+            config_manager=config_manager,
+            system_prompt="你是一个简洁的中文助手。",
+        )
 
-    async for text in engine.stream_chat("请用一句话介绍 LangChain。"):
-        print(text, end="", flush=True)
+        user_input = "请用一句话介绍 LangChain。"
+        print(f"用户：{user_input}")
+        print("助手：", end="", flush=True)
 
-    print("\nChatEngine 测试完成")
+        async for text in engine.stream_chat(user_input):
+            print(text, end="", flush=True)
+
+        logger.info("ChatEngine 测试完成：model_name=%s input_length=%s", engine.model_name, len(user_input))
+        print("\nChatEngine 测试完成")
+    except Exception:
+        logger.exception("ChatEngine 测试失败")
+        raise
 
 
 if __name__ == "__main__":

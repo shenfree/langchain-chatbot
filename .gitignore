@@ -1,4 +1,4 @@
-# Python 缓存文件
+﻿# Python 缓存文件
 __pycache__/
 *.py[cod]
 *$py.class
@@ -31,6 +31,8 @@ build/
 Thumbs.db
 
 # 运行日志和本地数据
-logs/
+logs/*.log
+logs/*.txt
+!logs/.gitkeep
 data/
 *.log

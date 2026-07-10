@@ -1,35 +1,33 @@
-﻿"""FileBackend 冒烟测试脚本。
-
-运行方式：
-    uv run python scripts/test_file_backend.py
-
-说明：
-- 如果 config.yaml 中 storage.type 不是 file，本脚本会直接跳过。
-- 如果 storage.type=file，会创建临时用户、会话、消息和预设，验证基本功能。
-"""
+﻿"""FileBackend 冒烟测试脚本。"""
 
 import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# 使用脚本方式运行时补充项目根目录，确保可以导入 src 包。
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.config_manager import ConfigManager
 from src.storage.factory import StorageFactory
+from src.utils.logger import get_logger, setup_logging
+
+logger = get_logger(__name__)
 
 
 async def main() -> None:
     """执行 FileBackend 最小闭环测试。"""
+    setup_logging(PROJECT_ROOT / "logging.yaml")
+    logger.info("FileBackend 冒烟测试开始")
+
     config_manager = ConfigManager(project_root=PROJECT_ROOT)
     config = config_manager.get_config()
     storage_config = config.get("storage", {})
     storage_type = storage_config.get("type", "sqlite")
 
     if storage_type != "file":
+        logger.warning("跳过 FileBackend 冒烟测试：storage_type=%s", storage_type)
         print("当前 storage.type 不是 file，跳过 FileBackend 冒烟测试。")
         return
 
@@ -38,14 +36,12 @@ async def main() -> None:
 
     username = f"file_test_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     try:
-        # 1. 创建或获取用户。
         user = await storage.get_user_by_username(username)
         if user is None:
             user = await storage.create_user(username)
         if user.id is None:
             raise RuntimeError("测试用户没有 ID。")
 
-        # 2. 创建会话并保存消息。
         session = await storage.create_session(
             user_id=user.id,
             title="FileBackend 冒烟测试会话",
@@ -61,7 +57,6 @@ async def main() -> None:
         if len(messages) < 2:
             raise RuntimeError("没有查询到完整的测试消息。")
 
-        # 3. 创建个人预设 Prompt，并验证可以查询到。
         preset = await storage.create_preset(
             user_id=user.id,
             name="FileBackend 测试预设",
@@ -76,14 +71,16 @@ async def main() -> None:
         if not any(item.id == preset.id for item in presets):
             raise RuntimeError("没有查询到刚创建的测试预设。")
 
-        # 4. 搜索当前用户历史消息，验证不会依赖数据库 JOIN 也能工作。
         results = await storage.search_messages(user.id, "keyword-step12")
         if not results:
             raise RuntimeError("搜索没有命中刚写入的测试消息。")
 
-        # 5. 清理临时用户，FileBackend 会手动级联删除关联数据。
         await storage.delete_user(user.id)
+        logger.info("FileBackend 冒烟测试通过：user_id=%s session_id=%s", user.id, session.id)
         print("FileBackend 冒烟测试通过")
+    except Exception:
+        logger.exception("FileBackend 冒烟测试失败")
+        raise
     finally:
         await storage.close()
 

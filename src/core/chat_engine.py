@@ -12,6 +12,9 @@ from langchain_openai import ChatOpenAI
 
 from src.core.config_manager import ConfigManager
 from src.core.model_manager import ModelManager
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ChatEngine:
@@ -23,13 +26,7 @@ class ChatEngine:
         system_prompt: str | None = None,
         model_name: str | None = None,
     ) -> None:
-        """初始化对话引擎。
-
-        Args:
-            config_manager: 配置管理器。
-            system_prompt: 默认系统提示词。
-            model_name: 指定模型；为空时使用 .env MODEL_NAME 或 config 默认模型。
-        """
+        """初始化对话引擎。"""
         self.config_manager = config_manager
         self.default_system_prompt = system_prompt
         self.model_manager = ModelManager(config_manager)
@@ -44,6 +41,14 @@ class ChatEngine:
         self.timeout = int(llm_config.get("timeout", 60))
         self.max_retries = int(llm_config.get("max_retries", 3))
         self.temperature = float(llm_config.get("temperature", 0.7))
+
+        logger.info(
+            "初始化 ChatEngine：model_name=%s timeout=%s max_retries=%s temperature=%s",
+            self.model_name,
+            self.timeout,
+            self.max_retries,
+            self.temperature,
+        )
 
         self.llm = ChatOpenAI(
             model=self.model_name,
@@ -66,11 +71,27 @@ class ChatEngine:
         if not cleaned_input:
             raise ValueError("用户输入不能为空。")
 
-        messages = self._build_messages(cleaned_input, history, system_prompt)
-        async for chunk in self.llm.astream(messages):
-            text = self._extract_chunk_text(chunk.content)
-            if text:
-                yield text
+        history_count = len(history or [])
+        logger.info(
+            "模型调用开始：model_name=%s input_length=%s history_count=%s has_system_prompt=%s",
+            self.model_name,
+            len(cleaned_input),
+            history_count,
+            bool(system_prompt or self.default_system_prompt),
+        )
+
+        try:
+            messages = self._build_messages(cleaned_input, history, system_prompt)
+            chunk_count = 0
+            async for chunk in self.llm.astream(messages):
+                text = self._extract_chunk_text(chunk.content)
+                if text:
+                    chunk_count += 1
+                    yield text
+            logger.info("模型调用完成：model_name=%s chunk_count=%s", self.model_name, chunk_count)
+        except Exception:
+            logger.exception("模型调用失败：model_name=%s input_length=%s", self.model_name, len(cleaned_input))
+            raise
 
     async def chat_once(
         self,
@@ -89,6 +110,7 @@ class ChatEngine:
         try:
             return self.model_manager.get_model_config(model_name)
         except ValueError:
+            logger.warning("模型配置未找到，使用旧版通用配置：model_name=%s", model_name)
             return {
                 "name": model_name,
                 "value": model_name,
@@ -111,11 +133,11 @@ class ChatEngine:
         if value and value.strip():
             return value.strip()
 
-        # 旧版兼容：如果模型没有独立 Key，尝试通用 API_KEY。
         legacy_key = self.config_manager.get_env("API_KEY")
         if env_key == "API_KEY" and legacy_key and legacy_key.strip():
             return legacy_key.strip()
 
+        logger.error("模型缺少 API Key 环境变量：model_name=%s env_key=%s", self.model_name, env_key)
         raise ValueError(f"当前模型 {self.model_name} 缺少环境变量 {env_key}，请在 .env 中配置。")
 
     def _build_messages(
